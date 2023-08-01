@@ -1,0 +1,1172 @@
+---
+title: "ST443 Task2"
+output: html_document
+date: "2022-12-08"
+author: "Group 11: 47565, 45795, 48272, 56266, 55974"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd(getwd())
+```
+# Load libaray
+```{r, include=FALSE}
+library(glmnet)
+library(glasso)
+library(MASS)
+library(caret)
+library(ISLR)
+library(ggplot2)
+```
+# Generating theta with p variates and different sparsities
+```{r}
+
+theta_matrix<-function(n,seed,sparsity){
+
+  set.seed(seed)  
+# generate matrix B with values of 0.5 given probabilities
+  B <- matrix(sample(c(0,0.5), n^2, replace=TRUE, prob=sparsity), n)
+
+# call the matrix lower triangle, need a symmetric matrix
+  i <- lower.tri(B)
+  B[i] <- t(B)[i]
+  diag(B) <- rep(0, n)
+
+# finding parameter r, such that the smallest eigenvalue of Θ is at least 1.
+  eigen_val <- min(eigen(B, symmetric=TRUE, only.values=TRUE)$values)
+  r<-1-min(eigen_val)
+  r
+
+# set theta
+  theta <- B + r*(diag(n))
+  eigen(theta)$values
+
+
+# standardizing values
+  v <- 1/sqrt(diag(theta))
+  theta_std <- theta * outer(v, v)
+
+  return(theta_std)
+}
+# p=75, sparsity=(0.6,0.4)
+theta_std1<-theta_matrix(75,42,c(0.6,0.4))
+# p=75, sparsity=(0.8,0.2)
+theta_std2<-theta_matrix(75,42,c(0.8,0.2))
+# p=75, sparsity=(0.9,0.1)
+theta_std3<-theta_matrix(75,42,c(0.9,0.1))
+# p=100, sparsity=(0.9,0.1)
+theta_std4<-theta_matrix(100,42,c(0.9,0.1))
+# p=50, sparsity=(0.9,0.1)
+theta_std5<-theta_matrix(50,42,c(0.9,0.1))
+
+```
+# Generating n samples from multivariate normal distribution
+```{r}
+generate_samples<-function(m,nsamples){
+  covar <- solve(m)
+  samples <- mvrnorm(n =nsamples, mu = rep(0,nrow(m)), Sigma = covar) 
+  dim(samples)
+  return(samples)
+}
+# p=75, n=500, sparsity=(0.6,0.4)
+samples1 <- generate_samples(theta_std1,500)
+# p=75, n=500, sparsity=(0.8,0.2)
+samples2 <- generate_samples(theta_std2,500)
+# p=75, n=500, sparsity=(0.9,0.1)
+samples3 <- generate_samples(theta_std3,500)
+# p=100, n=500, sparsity=(0.9,0.1)
+samples4 <- generate_samples(theta_std4,500)
+# p=50, n=500, sparsity=(0.9,0.1)
+samples5 <- generate_samples(theta_std5,500)
+# p=75, n=600, sparsity=(0.9,0.1)
+samples6 <- generate_samples(theta_std3,600)
+# p=75, n=300, sparsity=(0.9,0.1)
+samples7 <- generate_samples(theta_std3,300)
+```
+# Choose best lambda in nodewise Lasso
+```{r,inclde=FALSE}
+optimal_lambda_nwlasso<-function(data,nw_lambda,theta){
+  set.seed(1)
+  q <- ncol(data)
+  lambda <- nw_lambda
+  truerate <- matrix(0,q,length(lambda))
+  label <- sample(1:10, nrow(data),replace=TRUE)
+  theta_std <- theta
+  for(i in 1:10){     ##Cross validation to find the best lambda
+    cv_data <- data[label!=i,]
+    cv_x<- matrix(cv_data,ncol=q)
+    for(i in 1:q){
+    x <- cv_x[,-i]
+    y <- cv_x[,i]
+     for(j in 1:length(lambda)){  ##try every lambda and get coefficients
+      lasso_fit_1<-glmnet(x,y,intercept = FALSE,lambda=lambda[j],nlambda=1)
+      beta_j <- coef(lasso_fit_1)[2:q]
+      beta_j <- append(beta_j,1,j-1)
+        for(k in 1:q){    ## get the true rate by checking if the coefficients equal to 0 
+        if((beta_j[k]!=0&&theta_std[i,k]!=0)||(beta_j[k]==0&&theta_std[i,k]==0)){
+        truerate[i,j]=truerate[i,j]+1}
+    }
+    }
+    }
+    }
+  truerate <- (truerate-10)/10*(q-1)
+  op_lambda <- matrix(0,nrow=q,ncol=1)
+  for(i in 1:q){
+  max_n <- which.max(truerate[i,]) ## find the best lambda with highest true rate
+  op_lambda[i]=lambda[max_n]
+}
+  op_lambda <- matrix(op_lambda, ncol = 1)
+  return(op_lambda)
+}
+# p=75, n=500, sparsity=(0.6,0.4)
+op_lambda_nwl1 <- optimal_lambda_nwlasso(samples1,seq(0,0.5,0.01),theta_std1)
+# p=75, n=500, sparsity=(0.8,0.2)
+op_lambda_nwl2 <- optimal_lambda_nwlasso(samples2,seq(0,0.5,0.01),theta_std2)
+# p=75, n=500, sparsity=(0.9,0.1)
+op_lambda_nwl3 <- optimal_lambda_nwlasso(samples3,seq(0,0.5,0.01),theta_std3)
+# p=100, n=500, sparsity=(0.9,0.1)
+op_lambda_nwl4 <- optimal_lambda_nwlasso(samples4,seq(0,0.5,0.01),theta_std4)
+# p=50, n=500, sparsity=(0.9,0.1)
+op_lambda_nwl5 <- optimal_lambda_nwlasso(samples5,seq(0,0.5,0.01),theta_std5)
+# p=75, n=600, sparsity=(0.9,0.1)
+op_lambda_nwl6 <- optimal_lambda_nwlasso(samples6,seq(0,0.5,0.01),theta_std3)
+# p=75, n=300, sparsity=(0.9,0.1)
+op_lambda_nwl7 <- optimal_lambda_nwlasso(samples7,seq(0,0.5,0.01),theta_std3)
+```
+# Plot ROC curves of three models
+```{r}
+#Generate sequence of lambda in nodewise Lasso
+set_lambda_range <- function(best.lambda){ ## find 500 lambdas smaller than best lambda and 500 lambdas bigger than it  
+  lambda_values1<- array(0,c(length(best.lambda),1,501))
+  lambda_values2<- array(0,c(length(best.lambda),1,500))
+  lambda_range1 <- matrix(nrow = length(best.lambda), ncol = 501)
+  lambda_range2 <- matrix(nrow = length(best.lambda), ncol = 500)
+  for (i in 1:501){
+    for(j in 1:length(best.lambda)){
+    lambda_range1[j,] <- seq(0, best.lambda[j,1],(best.lambda[j,1]/500))
+    }
+  lambda_values1[,,i] <- lambda_range1[,i]
+  }
+  for (i in 1:500){
+    for(j in 1:length(best.lambda)){
+    lambda_range2[j,] <- seq(best.lambda[j,1]+(1-best.lambda[j,1])/500,1,((1-best.lambda[j,1])/500))
+    }
+  lambda_values2[,,i] <- lambda_range2[,i]
+  }
+  return(list(lambda_values1,lambda_values2))
+}
+## get left sequence and right sequence of different models
+# p=75, n=500, sparsity=(0.6,0.4)
+lambda_values1_1 <- set_lambda_range(op_lambda_nwl1)[[1]]
+lambda_values2_1 <- set_lambda_range(op_lambda_nwl1)[[2]]
+# p=75, n=500, sparsity=(0.8,0.2)
+lambda_values1_2 <- set_lambda_range(op_lambda_nwl2)[[1]]
+lambda_values2_2 <- set_lambda_range(op_lambda_nwl2)[[2]]
+# p=75, n=500, sparsity=(0.9,0.1)
+lambda_values1_3 <- set_lambda_range(op_lambda_nwl3)[[1]]
+lambda_values2_3 <- set_lambda_range(op_lambda_nwl3)[[2]]
+# p=100, n=500, sparsity=(0.9,0.1)
+lambda_values1_4 <- set_lambda_range(op_lambda_nwl4)[[1]]
+lambda_values2_4 <- set_lambda_range(op_lambda_nwl4)[[2]]
+# p=50, n=500, sparsity=(0.9,0.1)
+lambda_values1_5 <- set_lambda_range(op_lambda_nwl5)[[1]]
+lambda_values2_5 <- set_lambda_range(op_lambda_nwl5)[[2]]
+# p=75, n=600, sparsity=(0.9,0.1)
+lambda_values1_6 <- set_lambda_range(op_lambda_nwl6)[[1]]
+lambda_values2_6 <- set_lambda_range(op_lambda_nwl6)[[2]]
+# p=75, n=300, sparsity=(0.9,0.1)
+lambda_values1_7 <- set_lambda_range(op_lambda_nwl7)[[1]]
+lambda_values2_7 <- set_lambda_range(op_lambda_nwl7)[[2]]
+
+## Compute TPR,FPR and MER of nodewise Lasso1 and nodewise Lasso2 in different sequence of lambda
+nodewise_lasso<-function(x,lmb,theta){
+    nwl_train<- x
+    n <- dim(lmb)[3]
+    labm<-lmb
+    theta_std <- theta
+    p<-ncol(theta_std)
+    beta <- matrix(0,nrow=p,ncol=p)
+    beta_matrix <- array(0,c(p,p,length(labm)))
+    for(m in 1:n){
+      for (i in 1:p){
+       x <- nwl_train[,-i]
+       y <- nwl_train[,i]
+       lasso_fit<-glmnet(x,y,intercept = FALSE,
+                         lambda=labm[i,1,m],nlambda=1)
+       beta_i<- coef(lasso_fit)[2:p]
+       beta_i <- append(beta_i,1,i-1)
+       beta[,i] <- beta_i
+      }
+      beta_matrix[,,m] <- beta
+    }
+    #get edge
+    nl1 <- array(0,c(p,p,n))
+    nl2 <- array(0,c(p,p,n))
+    for(m in 1:n){
+      for(i in 1:p){
+        for(j in i:p){
+          if(beta_matrix[i,j,m]!=0&&beta_matrix[j,i,m]!=0){nl1[i,j,m]=nl1[j,i,m]=1}
+          else{nl1[i,j,m]==0}
+          if(beta_matrix[i,j,m]!=0||beta_matrix[j,i,m]!=0){nl2[i,j,m]=nl2[j,i,m]=1}
+          else{nl2[i,j,m]==0} 
+          }
+        }
+    }
+    
+    #tpr&fpr
+    tn1=fn1=tp1=fp1=0
+    tn2=fn2=tp2=fp2=0
+    mer1<-c()
+    mer2<-c()
+    
+    cm1 <- array(NA,c(2,2,n))
+    cm2 <- array(NA,c(2,2,n))
+    
+    for(i in 1:n){
+      for(j in 1:p){
+        for(k in 1:p){
+          if(nl1[j,k,i]!=0 && theta_std[j,k]!=0){
+            tp1=tp1+1
+          }
+          if(nl1[j,k,i]!=0 && theta_std[j,k]==0){
+            fp1=fp1+1
+          }
+           if(nl1[j,k,i]==0 && theta_std[j,k]!=0){
+            fn1=fn1+1
+          }
+          if(nl1[j,k,i]==0 && theta_std[j,k]==0){
+            tn1=tn1+1
+          }
+        }
+      }
+      cm1[1,1,i]=tn1
+      cm1[1,2,i]=fn1
+      cm1[2,1,i]=fp1
+      cm1[2,2,i]=tp1-p
+      mer1<-c(mer1,(fp1+fn1)/(p*(p-1)))
+      tn1=fn1=tp1=fp1=0
+    }
+    
+    for(i in 1:n){
+      for(j in 1:p){
+        for(k in 1:p){
+          if(nl2[j,k,i]!=0 && theta_std[j,k]!=0){
+            tp2=tp2+1
+          }
+          if(nl2[j,k,i]!=0 && theta_std[j,k]==0){
+            fp2=fp2+1
+          }
+           if(nl2[j,k,i]==0 && theta_std[j,k]!=0){
+            fn2=fn2+1
+          }
+          if(nl2[j,k,i]==0 && theta_std[j,k]==0){
+            tn2=tn2+1
+          }
+        }
+      }
+      cm2[1,1,i]=tn2
+      cm2[1,2,i]=fn2
+      cm2[2,1,i]=fp2
+      cm2[2,2,i]=tp2-p
+      mer2<-c(mer2,(fp2+fn2)/(p*(p-1)))
+      tn2=fn2=tp2=fp2=0
+    }
+    #false positive rate&true postive rate
+    fpr1 <- rep(0,n)
+    tpr1 <- rep(0,n)
+    for(i in 1:n){
+      fpr1[i]=cm1[2,1,i]/(cm1[1,1,i]+cm1[2,1,i])
+      tpr1[i]=cm1[2,2,i]/(cm1[2,2,i]+cm1[1,2,i])
+    }
+    fpr2 <- rep(0,n)
+    tpr2 <- rep(0,n)
+    for(i in 1:n){
+      fpr2[i]=cm2[2,1,i]/(cm2[1,1,i]+cm2[2,1,i])
+      tpr2[i]=cm2[2,2,i]/(cm2[2,2,i]+cm2[1,2,i])
+    }
+ 
+    return(list(tpr1,fpr1,tpr2,fpr2, mer1, mer2))
+}
+
+# Compute TPR,FPR and MER of graphical Lasso in different lambdas
+glasso_lasso <- function(x,lmb,theta){
+  q<-ncol(x)
+  m<- matrix(x,ncol=q)
+  theta_std <- theta
+  s<-var(m)
+  glasso_fit <- glassopath(s,rholist=lmb, penalize.diagonal=FALSE)
+  E_original <- matrix(0, ncol=q, nrow=q)
+  for (i in 1:q){
+    for (j in 1:q){
+      if (theta_std[i,j] !=0){
+          E_original[i,j] = 1
+      }
+    }
+  }
+  e_original <- c(E_original)
+  #comfusion matrix
+  tpr3 <- rep(0,length(lmb))
+  tn3=fn3=tp3=fp3=0
+  mer3 = 0
+  cm <- array(NA,c(2,2,length(lmb)))
+  for(i in 1:length(lmb)){
+    for(j in 1:q){
+      for(k in 1:q){
+          if(glasso_fit$wi[j,k,i]!=0 && theta_std[j,k]!=0){
+              tp3=tp3+1
+            }
+          if(glasso_fit$wi[j,k,i]!=0 && theta_std[j,k]==0){
+              fp3=fp3+1
+            }
+          if(glasso_fit$wi[j,k,i]==0 && theta_std[j,k]!=0){
+              fn3=fn3+1
+            }
+          if(glasso_fit$wi[j,k,i]==0 && theta_std[j,k]==0){
+              tn3=tn3+1
+            }
+        }
+    }
+  cm[1,1,i]=tn3
+  cm[1,2,i]=fn3
+  cm[2,1,i]=fp3
+  cm[2,2,i]=tp3-q
+  mer3<-c(mer3,(fp3+fn3)/(q*(q-1)))
+  tn3=fn3=tp3=fp3=0
+  }
+#false positive rate&true positive rate
+  fpr3 <- rep(0,length(lmb))
+  tpr3 <- rep(0,length(lmb))
+  for(i in 1:length(lmb)){
+    fpr3[i]=cm[2,1,i]/(cm[1,1,i]+cm[2,1,i])
+    tpr3[i]=cm[2,2,i]/(cm[2,2,i]+cm[1,2,i])
+  }
+  return(list(tpr3,fpr3,mer3))
+}
+
+## Compute TPR,FPR and MER of different nodewise Lasso1 and nodewise Lasso2 models in sequences of lambdas
+# p=75, n=500, sparsity=(0.6,0.4)
+values1_1<-nodewise_lasso(samples1,lambda_values1_1,theta_std1)
+values2_1<-nodewise_lasso(samples1,lambda_values2_1,theta_std1)
+tpr1_nwl1_1<-as.vector(c(values1_1[[1]],values2_1[[1]]))
+fpr1_nwl1_1<-as.vector(c(values1_1[[2]],values2_1[[2]]))
+tpr2_nwl2_1<-as.vector(c(values1_1[[3]],values2_1[[3]]))
+fpr2_nwl2_1<-as.vector(c(values1_1[[4]],values2_1[[4]]))
+# p=75, n=500, sparsity=(0.8,0.2)
+values1_2<-nodewise_lasso(samples2,lambda_values1_2,theta_std2)
+values2_2<-nodewise_lasso(samples2,lambda_values2_2,theta_std2)
+tpr1_nwl1_2<-as.vector(c(values1_2[[1]],values2_2[[1]]))
+fpr1_nwl1_2<-as.vector(c(values1_2[[2]],values2_2[[2]]))
+tpr2_nwl2_2<-as.vector(c(values1_2[[3]],values2_2[[3]]))
+fpr2_nwl2_2<-as.vector(c(values1_2[[4]],values2_2[[4]]))
+# p=75, n=500, sparsity=(0.9,0.1)
+values1_3<-nodewise_lasso(samples3,lambda_values1_3,theta_std3)
+values2_3<-nodewise_lasso(samples3,lambda_values2_3,theta_std3)
+tpr1_nwl1_3<-as.vector(c(values1_3[[1]],values2_3[[1]]))
+fpr1_nwl1_3<-as.vector(c(values1_3[[2]],values2_3[[2]]))
+tpr2_nwl2_3<-as.vector(c(values1_3[[3]],values2_3[[3]]))
+fpr2_nwl2_3<-as.vector(c(values1_3[[4]],values2_3[[4]]))
+# p=100, n=500, sparsity=(0.9,0.1)
+values1_4<-nodewise_lasso(samples4,lambda_values1_4,theta_std4)
+values2_4<-nodewise_lasso(samples4,lambda_values2_4,theta_std4)
+tpr1_nwl1_4<-as.vector(c(values1_4[[1]],values2_4[[1]]))
+fpr1_nwl1_4<-as.vector(c(values1_4[[2]],values2_4[[2]]))
+tpr2_nwl2_4<-as.vector(c(values1_4[[3]],values2_4[[3]]))
+fpr2_nwl2_4<-as.vector(c(values1_4[[4]],values2_4[[4]]))
+# p=50, n=500, sparsity=(0.9,0.1)
+values1_5<-nodewise_lasso(samples5,lambda_values1_5,theta_std5)
+values2_5<-nodewise_lasso(samples5,lambda_values2_5,theta_std5)
+tpr1_nwl1_5<-as.vector(c(values1_5[[1]],values2_5[[1]]))
+fpr1_nwl1_5<-as.vector(c(values1_5[[2]],values2_5[[2]]))
+tpr2_nwl2_5<-as.vector(c(values1_5[[3]],values2_5[[3]]))
+fpr2_nwl2_5<-as.vector(c(values1_5[[4]],values2_5[[4]]))
+# p=75, n=600, sparsity=(0.9,0.1)
+values1_6<-nodewise_lasso(samples6,lambda_values1_6,theta_std3)
+values2_6<-nodewise_lasso(samples6,lambda_values2_6,theta_std3)
+tpr1_nwl1_6<-as.vector(c(values1_6[[1]],values2_6[[1]]))
+fpr1_nwl1_6<-as.vector(c(values1_6[[2]],values2_6[[2]]))
+tpr2_nwl2_6<-as.vector(c(values1_6[[3]],values2_6[[3]]))
+fpr2_nwl2_6<-as.vector(c(values1_6[[4]],values2_6[[4]]))
+# p=75, n=300, sparsity=(0.9,0.1)
+values1_7<-nodewise_lasso(samples7,lambda_values1_7,theta_std3)
+values2_7<-nodewise_lasso(samples7,lambda_values2_7,theta_std3)
+tpr1_nwl1_7<-as.vector(c(values1_7[[1]],values2_7[[1]]))
+fpr1_nwl1_7<-as.vector(c(values1_7[[2]],values2_7[[2]]))
+tpr2_nwl2_7<-as.vector(c(values1_7[[3]],values2_7[[3]]))
+fpr2_nwl2_7<-as.vector(c(values1_7[[4]],values2_7[[4]]))
+
+## Compute TPR,FPR and MER of different graphical Lasso models in different lambdas
+glasso_lambda <- seq(0,1,0.001)
+# p=75, n=500, sparsity=(0.6,0.4)
+values3_1<-glasso_lasso(samples1,glasso_lambda,theta_std1)
+tpr3_gl3_1<-c(values3_1[[1]])
+fpr3_gl3_1<-c(values3_1[[2]])
+# p=75, n=500, sparsity=(0.8,0.2)
+values3_2<-glasso_lasso(samples2,glasso_lambda,theta_std2)
+tpr3_gl3_2<-c(values3_2[[1]])
+fpr3_gl3_2<-c(values3_2[[2]])
+# p=75, n=500, sparsity=(0.9,0.1)
+values3_3<-glasso_lasso(samples3,glasso_lambda,theta_std3)
+tpr3_gl3_3<-c(values3_3[[1]])
+fpr3_gl3_3<-c(values3_3[[2]])
+# p=100, n=500, sparsity=(0.9,0.1)
+values3_4<-glasso_lasso(samples4,glasso_lambda,theta_std4)
+tpr3_gl3_4<-c(values3_4[[1]])
+fpr3_gl3_4<-c(values3_4[[2]])
+# p=50, n=500, sparsity=(0.9,0.1)
+values3_5<-glasso_lasso(samples5,glasso_lambda,theta_std5)
+tpr3_gl3_5<-c(values3_5[[1]])
+fpr3_gl3_5<-c(values3_5[[2]])
+# p=75, n=600, sparsity=(0.9,0.1)
+values3_6<-glasso_lasso(samples6,glasso_lambda,theta_std3)
+tpr3_gl3_6<-c(values3_6[[1]])
+fpr3_gl3_6<-c(values3_6[[2]])
+# p=75, n=300, sparsity=(0.9,0.1)
+values3_7<-glasso_lasso(samples7,glasso_lambda,theta_std3)
+tpr3_gl3_7<-c(values3_7[[1]])
+fpr3_gl3_7<-c(values3_7[[2]])
+
+
+#ROC&AUROC
+# p=75, n=500, sparsity=(0.6,0.4)
+plot(fpr1_nwl1_1,tpr1_nwl1_1,type="l",col="blue",lwd = 3,main="ROC Curve of 3 models (p=75, n=500, (0.6,0.4))",xlab="FPR",ylab="TPR")
+lines(fpr2_nwl2_1,tpr2_nwl2_1,type="l",col='tomato2', lwd = 3)
+lines(fpr3_gl3_1,tpr3_gl3_1,type="l",col='limegreen', lwd = 3)
+legend('bottomright',c('nwl1','nwl2','gl'), col = c('blue','tomato2','limegreen'), lty = c(1,1,1))
+S1_1=S2_1=S3_1=0
+lambda_auc <- length(glasso_lambda)-1
+for (i in 1:lambda_auc) {
+  S1_1=S1_1+(tpr1_nwl1_1[i]+tpr1_nwl1_1[i+1])*(fpr1_nwl1_1[i]-fpr1_nwl1_1[i+1])/2
+  S2_1=S2_1+(tpr2_nwl2_1[i]+tpr2_nwl2_1[i+1])*(fpr2_nwl2_1[i]-fpr2_nwl2_1[i+1])/2
+  S3_1=S3_1+(tpr3_gl3_1[i]+tpr3_gl3_1[i+1])*(fpr3_gl3_1[i]-fpr3_gl3_1[i+1])/2
+}
+S1_1
+S2_1
+S3_1
+# p=75, n=500, sparsity=(0.8,0.2)
+plot(fpr1_nwl1_2,tpr1_nwl1_2,type="l",col="blue",lwd = 3,main="ROC Curve of 3 models (p=75, n=500, (0.8,0.2))",xlab="FPR",ylab="TPR")
+lines(fpr2_nwl2_2,tpr2_nwl2_2,type="l",col='tomato2', lwd = 3)
+lines(fpr3_gl3_2,tpr3_gl3_2,type="l",col='limegreen', lwd = 3)
+legend('bottomright',c('nwl1','nwl2','gl'), col = c('blue','tomato2','limegreen'), lty = c(1,1,1))
+S1_2=S2_2=S3_2=0
+lambda_auc <- length(glasso_lambda)-1
+for (i in 1:lambda_auc) {
+  S1_2=S1_2+(tpr1_nwl1_2[i]+tpr1_nwl1_2[i+1])*(fpr1_nwl1_2[i]-fpr1_nwl1_2[i+1])/2
+  S2_2=S2_2+(tpr2_nwl2_2[i]+tpr2_nwl2_2[i+1])*(fpr2_nwl2_2[i]-fpr2_nwl2_2[i+1])/2
+  S3_2=S3_2+(tpr3_gl3_2[i]+tpr3_gl3_2[i+1])*(fpr3_gl3_2[i]-fpr3_gl3_2[i+1])/2
+}
+S1_2
+S2_2
+S3_2
+# p=75, n=500, sparsity=(0.9,0.1)
+plot(fpr1_nwl1_3,tpr1_nwl1_3,type="l",col="blue",lwd = 3,main="ROC Curve of 3 models (p=75, n=500, (0.9,0.1))",xlab="FPR",ylab="TPR")
+lines(fpr2_nwl2_3,tpr2_nwl2_3,type="l",col='tomato2', lwd = 3)
+lines(fpr3_gl3_3,tpr3_gl3_3,type="l",col='limegreen', lwd = 3)
+legend('bottomright',c('nwl1','nwl2','gl'), col = c('blue','tomato2','limegreen'), lty = c(1,1,1))
+S1_3=S2_3=S3_3=0
+lambda_auc <- length(glasso_lambda)-1
+for (i in 1:lambda_auc) {
+  S1_3=S1_3+(tpr1_nwl1_3[i]+tpr1_nwl1_3[i+1])*(fpr1_nwl1_3[i]-fpr1_nwl1_3[i+1])/2
+  S2_3=S2_3+(tpr2_nwl2_3[i]+tpr2_nwl2_3[i+1])*(fpr2_nwl2_3[i]-fpr2_nwl2_3[i+1])/2
+  S3_3=S3_3+(tpr3_gl3_3[i]+tpr3_gl3_3[i+1])*(fpr3_gl3_3[i]-fpr3_gl3_3[i+1])/2
+}
+S1_3
+S2_3
+S3_3
+# p=100, n=500, sparsity=(0.9,0.1)
+plot(fpr1_nwl1_4,tpr1_nwl1_4,type="l",col="blue",lwd = 3,main="ROC Curve of 3 models (p=100, n=500, (0.9,0.1))",xlab="FPR",ylab="TPR")
+lines(fpr2_nwl2_4,tpr2_nwl2_4,type="l",col='tomato2', lwd = 3)
+lines(fpr3_gl3_4,tpr3_gl3_4,type="l",col='limegreen', lwd = 3)
+legend('bottomright',c('nwl1','nwl2','gl'), col = c('blue','tomato2','limegreen'), lty = c(1,1,1))
+S1_4=S2_4=S3_4=0
+lambda_auc <- length(glasso_lambda)-1
+for (i in 1:lambda_auc) {
+  S1_4=S1_4+(tpr1_nwl1_4[i]+tpr1_nwl1_4[i+1])*(fpr1_nwl1_4[i]-fpr1_nwl1_4[i+1])/2
+  S2_4=S2_4+(tpr2_nwl2_4[i]+tpr2_nwl2_4[i+1])*(fpr2_nwl2_4[i]-fpr2_nwl2_4[i+1])/2
+  S3_4=S3_4+(tpr3_gl3_4[i]+tpr3_gl3_4[i+1])*(fpr3_gl3_4[i]-fpr3_gl3_4[i+1])/2
+}
+S1_4
+S2_4
+S3_4
+# p=50, n=500, sparsity=(0.9,0.1)
+plot(fpr1_nwl1_5,tpr1_nwl1_5,type="l",col="blue",lwd = 3,main="ROC Curve of 3 models (p=50, n=500, (0.9,0.1))",xlab="FPR",ylab="TPR")
+lines(fpr2_nwl2_5,tpr2_nwl2_5,type="l",col='tomato2', lwd = 3)
+lines(fpr3_gl3_5,tpr3_gl3_5,type="l",col='limegreen', lwd = 3)
+legend('bottomright',c('nwl1','nwl2','gl'), col = c('blue','tomato2','limegreen'), lty = c(1,1,1))
+S1_5=S2_5=S3_5=0
+lambda_auc <- length(glasso_lambda)-1
+for (i in 1:lambda_auc) {
+  S1_5=S1_5+(tpr1_nwl1_5[i]+tpr1_nwl1_5[i+1])*(fpr1_nwl1_5[i]-fpr1_nwl1_5[i+1])/2
+  S2_5=S2_5+(tpr2_nwl2_5[i]+tpr2_nwl2_5[i+1])*(fpr2_nwl2_5[i]-fpr2_nwl2_5[i+1])/2
+  S3_5=S3_5+(tpr3_gl3_5[i]+tpr3_gl3_5[i+1])*(fpr3_gl3_5[i]-fpr3_gl3_5[i+1])/2
+}
+S1_5
+S2_5
+S3_5
+# p=75, n=600, sparsity=(0.9,0.1)
+plot(fpr1_nwl1_6,tpr1_nwl1_6,type="l",col="blue",lwd = 3,main="ROC Curve of 3 models (p=75, n=600, (0.9,0.1))",xlab="FPR",ylab="TPR")
+lines(fpr2_nwl2_6,tpr2_nwl2_6,type="l",col='tomato2', lwd = 3)
+lines(fpr3_gl3_6,tpr3_gl3_6,type="l",col='limegreen', lwd = 3)
+legend('bottomright',c('nwl1','nwl2','gl'), col = c('blue','tomato2','limegreen'), lty = c(1,1,1))
+S1_6=S2_6=S3_6=0
+lambda_auc <- length(glasso_lambda)-1
+for (i in 1:lambda_auc) {
+  S1_6=S1_6+(tpr1_nwl1_6[i]+tpr1_nwl1_6[i+1])*(fpr1_nwl1_6[i]-fpr1_nwl1_6[i+1])/2
+  S2_6=S2_6+(tpr2_nwl2_6[i]+tpr2_nwl2_6[i+1])*(fpr2_nwl2_6[i]-fpr2_nwl2_6[i+1])/2
+  S3_6=S3_6+(tpr3_gl3_6[i]+tpr3_gl3_6[i+1])*(fpr3_gl3_6[i]-fpr3_gl3_6[i+1])/2
+}
+S1_6
+S2_6
+S3_6
+# p=75, n=300, sparsity=(0.9,0.1)
+plot(fpr1_nwl1_7,tpr1_nwl1_7,type="l",col="blue",lwd = 3,main="ROC Curve of 3 models (p=75, n=300, (0.9,0.1))",xlab="FPR",ylab="TPR")
+lines(fpr2_nwl2_7,tpr2_nwl2_7,type="l",col='tomato2', lwd = 3)
+lines(fpr3_gl3_7,tpr3_gl3_7,type="l",col='limegreen', lwd = 3)
+legend('bottomright',c('nwl1','nwl2','gl'), col = c('blue','tomato2','limegreen'), lty = c(1,1,1))
+S1_7=S2_7=S3_7=0
+lambda_auc <- length(glasso_lambda)-1
+for (i in 1:lambda_auc) {
+  S1_7=S1_7+(tpr1_nwl1_7[i]+tpr1_nwl1_7[i+1])*(fpr1_nwl1_7[i]-fpr1_nwl1_7[i+1])/2
+  S2_7=S2_7+(tpr2_nwl2_7[i]+tpr2_nwl2_7[i+1])*(fpr2_nwl2_7[i]-fpr2_nwl2_7[i+1])/2
+  S3_7=S3_7+(tpr3_gl3_7[i]+tpr3_gl3_7[i+1])*(fpr3_gl3_7[i]-fpr3_gl3_7[i+1])/2
+}
+S1_7
+S2_7
+S3_7
+```
+# Select optimal lambda of glasso
+```{r,include=FALSE}
+optimal_lambda_glasso<-function(data,glasso_lambda,theta_std){
+  set.seed(1)
+  MSE <- matrix(ncol = length(glasso_lambda), nrow=10)
+  q <- ncol(data)
+  E_original <- matrix(0, ncol=q, nrow=q)
+  for (i in 1:q){
+    for (j in 1:q){
+      if (theta_std[i,j] !=0){
+          E_original[i,j] = 1
+      }
+    }
+  }
+  e_original <- c(E_original)
+  label <- sample(1:10, nrow(data),replace=TRUE)
+  for(i in 1:10){
+    cv_data <- data[label!=i,]
+    cv_x<- matrix(cv_data,ncol=q)
+    cv_s<-var(cv_x)
+    cv_glasso <- glassopath(cv_s,rholist=glasso_lambda, penalize.diagonal=FALSE)
+    for (j in 1:length(glasso_lambda)){
+      E <- matrix(0, ncol=ncol(theta_std), nrow=ncol(theta_std))
+      for (k in 1:ncol(theta_std)){
+        for (l in 1:ncol(theta_std)){
+          if (cv_glasso$wi[k,l,j] != 0){
+          E[k,l] = 1
+          }
+        }
+      }
+    e <- c(E)
+    MSE[i,j] <- length(e[e!=e_original])/length(e) 
+    }
+  }
+  colnames(MSE)=glasso_lambda
+  mean_MSE <- colMeans(MSE)
+  
+  best_lambda <- glasso_lambda[which.min(colMeans(MSE))]
+  return(list(best_lambda,mean_MSE))
+}
+# p=75, n=500, sparsity=(0.6,0.4)
+optimal_lambda_result_1<-optimal_lambda_glasso(samples1,seq(0,0.5,0.01),theta_std1)
+best_lambda_1 <- optimal_lambda_result_1[[1]]
+mean_MSE_1 <- optimal_lambda_result_1[[2]]
+# p=75, n=500, sparsity=(0.8,0.2)
+optimal_lambda_result_2<-optimal_lambda_glasso(samples2,seq(0,0.5,0.01),theta_std2)
+best_lambda_2 <- optimal_lambda_result_2[[1]]
+mean_MSE_2 <- optimal_lambda_result_2[[2]]
+# p=75, n=500, sparsity=(0.9,0.1)
+optimal_lambda_result_3<-optimal_lambda_glasso(samples3,seq(0,0.5,0.01),theta_std3)
+best_lambda_3 <- optimal_lambda_result_3[[1]]
+mean_MSE_3 <- optimal_lambda_result_3[[2]]
+# p=100, n=500, sparsity=(0.9,0.1)
+optimal_lambda_result_4<-optimal_lambda_glasso(samples4,seq(0,0.5,0.01),theta_std4)
+best_lambda_4 <- optimal_lambda_result_4[[1]]
+mean_MSE_4 <- optimal_lambda_result_4[[2]]
+# p=50, n=500, sparsity=(0.9,0.1)
+optimal_lambda_result_5<-optimal_lambda_glasso(samples5,seq(0,0.5,0.01),theta_std5)
+best_lambda_5 <- optimal_lambda_result_5[[1]]
+mean_MSE_5 <- optimal_lambda_result_5[[2]]
+# p=75, n=600, sparsity=(0.9,0.1)
+optimal_lambda_result_6<-optimal_lambda_glasso(samples6,seq(0,0.5,0.01),theta_std3)
+best_lambda_6 <- optimal_lambda_result_6[[1]]
+mean_MSE_6 <- optimal_lambda_result_6[[2]]
+# p=75, n=600, sparsity=(0.9,0.1)
+optimal_lambda_result_7<-optimal_lambda_glasso(samples7,seq(0,0.5,0.01),theta_std3)
+best_lambda_7 <- optimal_lambda_result_7[[1]]
+mean_MSE_7 <- optimal_lambda_result_7[[2]]
+
+#Visualization of selecting best lambda of the cas with p=75, n=500, sparsity=(0.9,0.1)
+plot(seq(0,0.5,0.01),mean_MSE_3,type="line",col="red",main="MER of Glasso",xlab="Lambda",ylab="Mean MER",lwd=1.5)
+segments(x0 = best_lambda_3, y0 = -0.5, y1 = min(mean_MSE_3), lty = "dashed", lwd = 2, col ="blue")
+segments(x0 = -50, y0 = min(mean_MSE_3), x1 = best_lambda_3, lty = "dashed", lwd = 2, col ="blue")
+axis(1, at = best_lambda_3,label = best_lambda_3)
+axis(2, at =min(mean_MSE_3),label = round(min(mean_MSE_3),3), las = 1)
+
+```
+# Compare 3 models under best lambda
+```{r}
+# Performance of node-wise Lasso 1 and 2
+nodewise_best<-function(x,lmb,theta){
+    nwl_test<- x
+    labm<-lmb
+    theta_std <- theta
+    p<-ncol(theta_std)
+    beta <- matrix(0,nrow=p,ncol=p)
+
+      for (i in 1:p){
+       x <- nwl_test[,-i]
+       y <- nwl_test[,i]
+       lasso_fit<-glmnet(x,y,intercept = FALSE,
+                         lambda=labm[i],nlambda=1)
+       beta_i<- append(coef(lasso_fit)[2:p],1,i-1)
+       beta[i,] <- beta_i
+      }
+
+    #get edge
+    nl1 <- matrix(0,nrow=p,ncol=p)
+    nl2 <- matrix(0,nrow=p,ncol=p)
+      for(i in 1:p){
+        for(j in i:p){
+          if(beta[i,j]!=0&&beta[j,i]!=0){nl1[i,j]=nl1[j,i]=1}
+          else{nl1[i,j]=nl1[j,i]=0}
+          if(beta[i,j]!=0||beta[j,i]!=0){nl2[i,j]=nl2[j,i]=1}
+          else{nl2[i,j]=nl2[j,i]=0} 
+          }
+        }
+
+    
+    #tpr&fpr
+    tn1=fn1=tp1=fp1=0
+    tn2=fn2=tp2=fp2=0
+    cm1 <- matrix(NA,nrow = 2, ncol = 2)
+    cm2 <- matrix(NA,nrow = 2, ncol = 2)
+    
+
+      for(j in 1:p){
+        for(k in 1:p){
+          if(nl1[j,k]!=0 && theta_std[j,k]!=0){
+            tp1=tp1+1
+          }
+          if(nl1[j,k]!=0 && theta_std[j,k]==0){
+            fp1=fp1+1
+          }
+           if(nl1[j,k]==0 && theta_std[j,k]!=0){
+            fn1=fn1+1
+          }
+          if(nl1[j,k]==0 && theta_std[j,k]==0){
+            tn1=tn1+1
+          }
+        }
+      }
+      cm1[1,1]=tn1
+      cm1[1,2]=fn1
+      cm1[2,1]=fp1
+      cm1[2,2]=tp1-p
+      mer1<- (fp1+fn1)/(p*(p-1))
+      for(j in 1:p){
+        for(k in 1:p){
+          if(nl2[j,k]!=0 && theta_std[j,k]!=0){
+            tp2=tp2+1
+          }
+          if(nl2[j,k]!=0 && theta_std[j,k]==0){
+            fp2=fp2+1
+          }
+           if(nl2[j,k]==0 && theta_std[j,k]!=0){
+            fn2=fn2+1
+          }
+          if(nl2[j,k]==0 && theta_std[j,k]==0){
+            tn2=tn2+1
+          }
+        }
+      }  
+      cm2[1,1]=tn2
+      cm2[1,2]=fn2
+      cm2[2,1]=fp2
+      cm2[2,2]=tp2-p
+      mer2<-(fp2+fn2)/(p*(p-1))
+    #false positive rate&true postive rate
+    fpr1=cm1[2,1]/(cm1[1,1]+cm1[2,1])
+    tpr1=cm1[2,2]/(cm1[2,2]+cm1[1,2])
+    fpr2=cm2[2,1]/(cm2[1,1]+cm2[2,1])
+    tpr2=cm2[2,2]/(cm2[2,2]+cm2[1,2])
+    return(list(1-tpr1,fpr1,1-tpr2,fpr2,mer1,mer2))
+}
+
+# Performance of graphical lasso
+glasso_best <- function(x,lmb,theta){
+  q<-ncol(x)
+  m<- matrix(x,ncol=q)
+  theta_std <- theta
+  s<-var(m)
+  glasso_fit <- glasso(s,rho=lmb, penalize.diagonal=FALSE)
+  #confusion matrix
+  tn3=fn3=tp3=fp3=0
+  cm <- array(NA,c(2,2))
+    for(j in 1:q){
+      for(k in 1:q){
+          if(glasso_fit$wi[j,k]!=0 && theta_std[j,k]!=0){
+              tp3=tp3+1
+            }
+          if(glasso_fit$wi[j,k]!=0 && theta_std[j,k]==0){
+              fp3=fp3+1
+            }
+          if(glasso_fit$wi[j,k]==0 && theta_std[j,k]!=0){
+              fn3=fn3+1
+            }
+          if(glasso_fit$wi[j,k]==0 && theta_std[j,k]==0){
+              tn3=tn3+1
+            }
+        }
+    }
+  cm[1,1]=tn3
+  cm[1,2]=fn3
+  cm[2,1]=fp3
+  cm[2,2]=tp3
+#false positive rate&true positive rate
+  fpr3 <- cm[2,1]/(cm[1,1]+cm[2,1])
+  tpr3 <- cm[2,2]/(cm[2,2]+cm[1,2])
+  mer3 <- 1-(cm[2,2]+cm[1,1])/(cm[1,1]+cm[1,2]+cm[2,1]+cm[2,2])
+  return(list(1-tpr3,fpr3,mer3))
+}
+# p=75, n=500, sparsity=(0.6,0.4)
+best_nodewise_1 <- nodewise_best(samples1, op_lambda_nwl1,theta_std1)
+best_glasso_1 <- glasso_best(samples1,best_lambda_1,theta_std1)
+# p=75, n=500, sparsity=(0.8,0.2)
+best_nodewise_2 <- nodewise_best(samples2, op_lambda_nwl2,theta_std2)
+best_glasso_2 <- glasso_best(samples2,best_lambda_2,theta_std2)
+# p=75, n=500, sparsity=(0.9,0.1)
+best_nodewise_3 <- nodewise_best(samples3, op_lambda_nwl3,theta_std3)
+best_glasso_3 <- glasso_best(samples3,best_lambda_3,theta_std3)
+# p=100, n=500, sparsity=(0.9,0.1)
+best_nodewise_4 <- nodewise_best(samples4, op_lambda_nwl4,theta_std4)
+best_glasso_4 <- glasso_best(samples4,best_lambda_4,theta_std4)
+# p=50, n=500, sparsity=(0.9,0.1)
+best_nodewise_5<- nodewise_best(samples5, op_lambda_nwl5,theta_std5)
+best_glasso_5 <- glasso_best(samples5,best_lambda_5,theta_std5)
+# p=75, n=600, sparsity=(0.9,0.1)
+best_nodewise_6 <- nodewise_best(samples6, op_lambda_nwl6,theta_std3)
+best_glasso_6 <- glasso_best(samples6,best_lambda_6,theta_std3)
+# p=75, n=300, sparsity=(0.9,0.1)
+best_nodewise_7 <- nodewise_best(samples7, op_lambda_nwl7,theta_std3)
+best_glasso_7 <- glasso_best(samples7,best_lambda_7,theta_std3)
+```
+# Run 100 times
+```{r, inlucde=FALSE}
+# p=100, n=500, sparsity=(0.9,0.1)
+column.names <- c("FNR","FPR","MER")
+matrix.names <- c("nwl1","nwl2",'gl')
+result_array_100_500 <- array(0,dim=c(100,3,3),dimnames = list(c(1:100),column.names,matrix.names))
+for  (i in 1:100){
+  theta_std<-theta_matrix(100,i,c(0.9,0.1)) ## generate theta
+  samples <- generate_samples(theta_std,500) ## generate samples
+  op_lambda_nwl <- optimal_lambda_nwlasso(samples,seq(0,0.5,0.01),theta_std) ## find the best lamnda in nodewise lasso
+  best_lambda<-optimal_lambda_glasso(samples,seq(0,0.5,0.01),theta_std)[[1]] ## find the best lambda in glasso
+  nw<-nodewise_best(samples,op_lambda_nwl,theta_std) ## fit the model with the best lambda and get the TPR ,FNR and MER
+  gl <- glasso_best(samples,best_lambda,theta_std)
+  result_array_100_500[i,1,1] <- nw[[1]]
+  result_array_100_500[i,2,1] <- nw[[2]]
+  result_array_100_500[i,3,1] <- nw[[5]]
+  result_array_100_500[i,1,2] <- nw[[3]]
+  result_array_100_500[i,2,2] <- nw[[4]]
+  result_array_100_500[i,3,2] <- nw[[6]]
+  result_array_100_500[i,1,3] <- gl[[1]]
+  result_array_100_500[i,2,3] <- gl[[2]]
+  result_array_100_500[i,3,3] <- gl[[3]]
+  print(i)
+}
+write.csv(result_array_100_500,file = '100_500_0.9.csv')
+# p=50, n=500, sparsity=(0.9,0.1)
+result_array_50_500 <- array(0,dim=c(100,3,3),dimnames = list(c(1:100),column.names,matrix.names))
+for  (i in 1:100){
+  theta_std<-theta_matrix(50,i,c(0.9,0.1))
+  samples <- generate_samples(theta_std,500)
+  op_lambda_nwl <- optimal_lambda_nwlasso(samples,seq(0,0.5,0.01),theta_std)
+  best_lambda<-optimal_lambda_glasso(samples,seq(0,0.5,0.01),theta_std)[[1]]
+  nw<-nodewise_best(samples,op_lambda_nwl,theta_std)
+  gl <- glasso_best(samples,best_lambda,theta_std)
+  result_array_50_500[i,1,1] <- nw[[1]]
+  result_array_50_500[i,2,1] <- nw[[2]]
+  result_array_50_500[i,3,1] <- nw[[5]]
+  result_array_50_500[i,1,2] <- nw[[3]]
+  result_array_50_500[i,2,2] <- nw[[4]]
+  result_array_50_500[i,3,2] <- nw[[6]]
+  result_array_50_500[i,1,3] <- gl[[1]]
+  result_array_50_500[i,2,3] <- gl[[2]]
+  result_array_50_500[i,3,3] <- gl[[3]]
+  print(i)
+}
+write.csv(result_array_50_500,file = '50_500_0.9.csv')
+# p=75, n=500, sparsity=(0.8,0.2)
+column.names <- c("FNR","FPR","MER")
+matrix.names <- c("nwl1","nwl2",'gl')
+result_array_75_500_0.8 <- array(0,dim=c(100,3,3),dimnames = list(c(1:100),column.names,matrix.names))
+for  (i in 1:100){
+  theta_std<-theta_matrix(75,i,c(0.8,0.2))
+  samples <- generate_samples(theta_std,500)
+  op_lambda_nwl <- optimal_lambda_nwlasso(samples,seq(0,0.5,0.01),theta_std)
+  best_lambda<-optimal_lambda_glasso(samples,seq(0,0.5,0.01),theta_std)[[1]]
+  nw<-nodewise_best(samples,op_lambda_nwl,theta_std)
+  gl <- glasso_best(samples,best_lambda,theta_std)
+  result_array_75_500_0.8[i,1,1] <- nw[[1]]
+  result_array_75_500_0.8[i,2,1] <- nw[[2]]
+  result_array_75_500_0.8[i,3,1] <- nw[[5]]
+  result_array_75_500_0.8[i,1,2] <- nw[[3]]
+  result_array_75_500_0.8[i,2,2] <- nw[[4]]
+  result_array_75_500_0.8[i,3,2] <- nw[[6]]
+  result_array_75_500_0.8[i,1,3] <- gl[[1]]
+  result_array_75_500_0.8[i,2,3] <- gl[[2]]
+  result_array_75_500_0.8[i,3,3] <- gl[[3]]
+  print(i)
+}
+write.csv(result_array_75_500_0.8,file = '75_500_0.8.csv')
+# p=75, n=500, sparsity=(0.6,0.4)
+column.names <- c("FNR","FPR","MER")
+matrix.names <- c("nwl1","nwl2",'gl')
+result_array_75_500_0.6 <- array(0,dim=c(100,3,3),dimnames = list(c(1:100),column.names,matrix.names))
+for  (i in 1:100){
+  theta_std<-theta_matrix(75,i,c(0.6,0.4))
+  samples <- generate_samples(theta_std,500)
+  op_lambda_nwl <- optimal_lambda_nwlasso(samples,seq(0,0.5,0.01),theta_std)
+  best_lambda<-optimal_lambda_glasso(samples,seq(0,0.5,0.01),theta_std)[[1]]
+  nw<-nodewise_best(samples,op_lambda_nwl,theta_std)
+  gl <- glasso_best(samples,best_lambda,theta_std)
+  result_array_75_500_0.6[i,1,1] <- nw[[1]]
+  result_array_75_500_0.6[i,2,1] <- nw[[2]]
+  result_array_75_500_0.6[i,3,1] <- nw[[5]]
+  result_array_75_500_0.6[i,1,2] <- nw[[3]]
+  result_array_75_500_0.6[i,2,2] <- nw[[4]]
+  result_array_75_500_0.6[i,3,2] <- nw[[6]]
+  result_array_75_500_0.6[i,1,3] <- gl[[1]]
+  result_array_75_500_0.6[i,2,3] <- gl[[2]]
+  result_array_75_500_0.6[i,3,3] <- gl[[3]]
+  print(i)
+}
+write.csv(result_array_75_500_0.6,file = '75_500_0.6.csv')
+# p=75, n=500, sparsity=(0.9,0.1)
+column.names <- c("FNR","FPR","MER")
+matrix.names <- c("nwl1","nwl2",'gl')
+result_array_75_500 <- array(0,dim=c(100,3,3),dimnames = list(c(1:100),column.names,matrix.names))
+for  (i in 1:100){
+  theta_std<-theta_matrix(75,i,c(0.9,0.1)) 
+  samples <- generate_samples(theta_std,500) 
+  op_lambda_nwl <- optimal_lambda_nwlasso(samples,seq(0,0.5,0.01),theta_std)
+  best_lambda<-optimal_lambda_glasso(samples,seq(0,0.5,0.01),theta_std)[[1]] 
+  nw<-nodewise_best(samples,op_lambda_nwl,theta_std) 
+  gl <- glasso_best(samples,best_lambda,theta_std) 
+  result_array_75_500[i,1,1] <- nw[[1]]
+  result_array_75_500[i,2,1] <- nw[[2]]
+  result_array_75_500[i,3,1] <- nw[[5]]
+  result_array_75_500[i,1,2] <- nw[[3]]
+  result_array_75_500[i,2,2] <- nw[[4]]
+  result_array_75_500[i,3,2] <- nw[[6]]
+  result_array_75_500[i,1,3] <- gl[[1]]
+  result_array_75_500[i,2,3] <- gl[[2]]
+  result_array_75_500[i,3,3] <- gl[[3]]
+  print(i)
+}
+write.csv(result_array_75_500,file = '75_500_0.9.csv')
+# p=75, n=300, sparsity=(0.9,0.1)
+result_array_75_300 <- array(0,dim=c(100,3,3),dimnames = list(c(1:100),column.names,matrix.names))
+for  (i in 1:100){
+  theta_std<-theta_matrix(75,i,c(0.9,0.1))
+  samples <- generate_samples(theta_std,300)
+  op_lambda_nwl <- optimal_lambda_nwlasso(samples,seq(0,0.5,0.01),theta_std)
+  best_lambda<-optimal_lambda_glasso(samples,seq(0,0.5,0.01),theta_std)[[1]]
+  nw<-nodewise_best(samples,op_lambda_nwl,theta_std)
+  gl <- glasso_best(samples,best_lambda,theta_std)
+  result_array_75_300[i,1,1] <- nw[[1]]
+  result_array_75_300[i,2,1] <- nw[[2]]
+  result_array_75_300[i,3,1] <- nw[[5]]
+  result_array_75_300[i,1,2] <- nw[[3]]
+  result_array_75_300[i,2,2] <- nw[[4]]
+  result_array_75_300[i,3,2] <- nw[[6]]
+  result_array_75_300[i,1,3] <- gl[[1]]
+  result_array_75_300[i,2,3] <- gl[[2]]
+  result_array_75_300[i,3,3] <- gl[[3]]
+  print(i)
+}
+write.csv(result_array_75_300,file = '75_300_0.9.csv')
+# p=75, n=600, sparsity=(0.9,0.1)
+result_array_75_600 <- array(0,dim=c(100,3,3),dimnames = list(c(1:100),column.names,matrix.names))
+for  (i in 1:100){
+  theta_std<-theta_matrix(75,i,c(0.9,0.1))
+  samples <- generate_samples(theta_std,600)
+  op_lambda_nwl <- optimal_lambda_nwlasso(samples,seq(0,0.5,0.01),theta_std)
+  best_lambda<-optimal_lambda_glasso(samples,seq(0,0.5,0.01),theta_std)[[1]]
+  nw<-nodewise_best(samples,op_lambda_nwl,theta_std)
+  gl <- glasso_best(samples,best_lambda,theta_std)
+  result_array_75_600[i,1,1] <- nw[[1]]
+  result_array_75_600[i,2,1] <- nw[[2]]
+  result_array_75_600[i,3,1] <- nw[[5]]
+  result_array_75_600[i,1,2] <- nw[[3]]
+  result_array_75_600[i,2,2] <- nw[[4]]
+  result_array_75_600[i,3,2] <- nw[[6]]
+  result_array_75_600[i,1,3] <- gl[[1]]
+  result_array_75_600[i,2,3] <- gl[[2]]
+  result_array_75_600[i,3,3] <- gl[[3]]
+  print(i)
+}
+write.csv(result_array_75_600,file = '75_600_0.9.csv')
+```
+# Statistical description of the results of runing 100 times
+```{r}
+# p=100, n=500, sparsity=(0.9,0.1)
+# Average FNR,FPR, MER
+mean_FNR_100_500 <- c(mean(result_array_100_500[,1,1]),mean(result_array_100_500[,1,2]),mean(result_array_100_500[,1,3]))
+mean_FPR_100_500 <-c(mean(result_array_100_500[,2,1]),mean(result_array_100_500[,2,2]),mean(result_array_100_500[,2,3]))
+mean_MER_100_500<-c(mean(result_array_100_500[,3,1]),mean(result_array_100_500[,3,2]),mean(result_array_100_500[,3,3]))
+results_100_500<-data.frame(Mean_FNR=mean_FNR_100_500,Mean_FPR=mean_FPR_100_500,Mean_MER=mean_MER_100_500)
+row.names(results_100_500)<-c('Node-Wise Lasso 1','Node-Wise Lasso 2','Graphical Lasso')
+results_100_500
+write.csv(results_100_500,file = 'ave_100_500_0.9.csv')
+
+# Scatter plots
+plot(c(1:100), result_array_100_500[1:100,1,1], ylim = c(0,1), pch =16, col = 1, main="100 FNRs of 3 models (p=100, n=500)",xlab="Times",ylab="FNR")
+points(c(1:100), result_array_100_500[1:100,1,2], pch = 16, col =2)
+points(c(1:100), result_array_100_500[1:100,1,3], pch = 16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_100_500[1:100,2,1], ylim = c(0,0.2), pch =16, col = 1, main="100 FPRs of 3 models (p=100, n=500)",xlab="Times",ylab="FPR")
+points(c(1:100), result_array_100_500[1:100,2,2], pch = 16, col =2)
+points(c(1:100), result_array_100_500[1:100,2,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_100_500[1:100,3,1], ylim = c(0,0.2), pch=16, col = 1, main="100 MERs of 3 models (p=100, n=500)",xlab="Times",ylab="MER")
+points(c(1:100), result_array_100_500[1:100,3,2], pch =16, col =2)
+points(c(1:100), result_array_100_500[1:100,3,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+
+# Boxplots
+boxplot(result_array_100_500[1:100,1,1], result_array_100_500[1:100,1,2], result_array_100_500[1:100,1,3],col = "white",cex=0.5, pch=20, 
+        main = "FNR (p=100,n=500)",ylab="FNR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"))
+boxplot(result_array_100_500[1:100,2,1], result_array_100_500[1:100,2,2], result_array_100_500[1:100,2,3],col = "white",cex=0.5, pch=20, 
+        main = "FPR (p=100,n=500)",ylab="FPR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+boxplot(result_array_100_500[1:100,3,1], result_array_100_500[1:100,3,2], result_array_100_500[1:100,3,3],col = "white",cex=0.5, pch=20, 
+        main = "MER (p=100,n=500)",ylab="MER",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+
+
+
+# p=50, n=500, sparsity=(0.9,0.1)
+# Average FNR,FPR, MER
+mean_FNR_50_500 <- c(mean(result_array_50_500[,1,1]),mean(result_array_50_500[,1,2]),mean(result_array_50_500[,1,3]))
+mean_FPR_50_500 <-c(mean(result_array_50_500[,2,1]),mean(result_array_50_500[,2,2]),mean(result_array_50_500[,2,3]))
+mean_MER_50_500<-c(mean(result_array_50_500[,3,1]),mean(result_array_50_500[,3,2]),mean(result_array_50_500[,3,3]))
+results_50_500<-data.frame(Mean_FNR=mean_FNR_50_500,Mean_FPR=mean_FPR_50_500,Mean_MER=mean_MER_50_500)
+row.names(results_50_500)<-c('Node-Wise Lasso 1','Node-Wise Lasso 2','Graphical Lasso')
+results_50_500
+write.csv(results_50_500,file = 'ave_50_500_0.9.csv')
+
+# Scatter plots
+plot(c(1:100), result_array_50_500[1:100,1,1], ylim = c(0,1), pch =16, col = 1, main="100 FNRs of 3 models (p=50, n=500)",xlab="Times",ylab="FNR")
+points(c(1:100), result_array_50_500[1:100,1,2], pch = 16, col =2)
+points(c(1:100), result_array_50_500[1:100,1,3], pch = 16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_50_500[1:100,2,1], ylim = c(0,0.2), pch =16, col = 1, main="100 FPRs of 3 models (p=50, n=500)",xlab="Times",ylab="FPR")
+points(c(1:100), result_array_50_500[1:100,2,2], pch = 16, col =2)
+points(c(1:100), result_array_50_500[1:100,2,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_50_500[1:100,3,1], ylim = c(0,0.2), pch=16, col = 1, main="100 MERs of 3 models (p=50, n=500)",xlab="Times",ylab="MER")
+points(c(1:100), result_array_50_500[1:100,3,2], pch =16, col =2)
+points(c(1:100), result_array_50_500[1:100,3,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+
+# Boxplots
+boxplot(result_array_50_500[1:100,1,1], result_array_50_500[1:100,1,2], result_array_50_500[1:100,1,3],col = "white",cex=0.5, pch=20, 
+        main = "FNR (p=50,n=500)",ylab="FNR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"))
+boxplot(result_array_50_500[1:100,2,1], result_array_50_500[1:100,2,2], result_array_50_500[1:100,2,3],col = "white",cex=0.5, pch=20, 
+        main = "FPR (p=50,n=500)",ylab="FPR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+boxplot(result_array_50_500[1:100,3,1], result_array_50_500[1:100,3,2], result_array_50_500[1:100,3,3],col = "white",cex=0.5, pch=20, 
+        main = "MER (p=50,n=500)",ylab="MER",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+
+
+
+# p=75, n=500, sparsity=(0.9,0.1)
+# Average FNR,FPR, MER
+mean_FNR_75_500 <- c(mean(result_array_75_500[,1,1]),mean(result_array_75_500[,1,2]),mean(result_array_75_500[,1,3]))
+mean_FPR_75_500 <-c(mean(result_array_75_500[,2,1]),mean(result_array_75_500[,2,2]),mean(result_array_75_500[,2,3]))
+mean_MER_75_500<-c(mean(result_array_75_500[,3,1]),mean(result_array_75_500[,3,2]),mean(result_array_75_500[,3,3]))
+results_75_500<-data.frame(Mean_FNR=mean_FNR_75_500,Mean_FPR=mean_FPR_75_500,Mean_MER=mean_MER_75_500)
+row.names(results_75_500)<-c('Node-Wise Lasso 1','Node-Wise Lasso 2','Graphical Lasso')
+results_75_500
+write.csv(results_75_500,file = 'ave_75_500_0.9.csv')
+
+# Scatter plots
+plot(c(1:100), result_array_75_500[1:100,1,1], ylim = c(0,1), pch =16, col = 1, main="100 FNRs of 3 models (p=75, n=500)",xlab="Times",ylab="FNR")
+points(c(1:100), result_array_75_500[1:100,1,2], pch = 16, col =2)
+points(c(1:100), result_array_75_500[1:100,1,3], pch = 16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_75_500[1:100,2,1], ylim = c(0,0.2), pch =16, col = 1, main="100 FPRs of 3 models (p=75, n=500)",xlab="Times",ylab="FPR")
+points(c(1:100), result_array_75_500[1:100,2,2], pch = 16, col =2)
+points(c(1:100), result_array_75_500[1:100,2,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_75_500[1:100,3,1], ylim = c(0,0.2), pch=16, col = 1, main="100 MERs of 3 models (p=75, n=500)",xlab="Times",ylab="MER")
+points(c(1:100), result_array_75_500[1:100,3,2], pch =16, col =2)
+points(c(1:100), result_array_75_500[1:100,3,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+
+# Boxplots
+boxplot(result_array_75_500[1:100,1,1], result_array_75_500[1:100,1,2], result_array_75_500[1:100,1,3],col = "white",cex=0.5, pch=20, 
+        main = "FNR (p=75,n=500)",ylab="FNR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"))
+boxplot(result_array_75_500[1:100,2,1], result_array_75_500[1:100,2,2], result_array_75_500[1:100,2,3],col = "white",cex=0.5, pch=20, 
+        main = "FNR (p=75,n=500)",ylab="FPR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+boxplot(result_array_75_500[1:100,3,1], result_array_75_500[1:100,3,2], result_array_75_500[1:100,3,3],col = "white",cex=0.5, pch=20, 
+        main = "MER (p=75,n=500)",ylab="MER",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+
+
+
+# p=75, n=600, sparsity=(0.9,0.1)
+# Average FNR,FPR, MER
+mean_FNR_75_600 <- c(mean(result_array_75_600[,1,1]),mean(result_array_75_600[,1,2]),mean(result_array_75_600[,1,3]))
+mean_FPR_75_600 <-c(mean(result_array_75_600[,2,1]),mean(result_array_75_600[,2,2]),mean(result_array_75_600[,2,3]))
+mean_MER_75_600<-c(mean(result_array_75_600[,3,1]),mean(result_array_75_600[,3,2]),mean(result_array_75_600[,3,3]))
+results_75_600<-data.frame(Mean_FNR=mean_FNR_75_600,Mean_FPR=mean_FPR_75_600,Mean_MER=mean_MER_75_600)
+row.names(results_75_600)<-c('Node-Wise Lasso 1','Node-Wise Lasso 2','Graphical Lasso')
+results_75_600
+write.csv(results_75_600,file = 'ave_75_600_0.9.csv')
+
+# Scatter plots
+plot(c(1:100), result_array_75_600[1:100,1,1], ylim = c(0,1), pch =16, col = 1, main="100 FNRs of 3 models (p=75, n=600)",xlab="Times",ylab="FNR")
+points(c(1:100), result_array_75_600[1:100,1,2], pch = 16, col =2)
+points(c(1:100), result_array_75_600[1:100,1,3], pch = 16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_75_600[1:100,2,1], ylim = c(0,0.2), pch =16, col = 1, main="100 FPRs of 3 models (p=75, n=600)",xlab="Times",ylab="FPR")
+points(c(1:100), result_array_75_600[1:100,2,2], pch = 16, col =2)
+points(c(1:100), result_array_75_600[1:100,2,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_75_600[1:100,3,1], ylim = c(0,0.2), pch=16, col = 1, main="100 MERs of 3 models (p=75, n=600)",xlab="Times",ylab="MER")
+points(c(1:100), result_array_75_600[1:100,3,2], pch =16, col =2)
+points(c(1:100), result_array_75_600[1:100,3,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+# Boxplots
+boxplot(result_array_75_600[1:100,1,1], result_array_75_600[1:100,1,2], result_array_75_600[1:100,1,3],col = "white",cex=0.5, pch=20, 
+        main = "FNR (p=75,n=600)",ylab="FNR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"))
+boxplot(result_array_75_600[1:100,2,1], result_array_75_600[1:100,2,2], result_array_75_600[1:100,2,3],col = "white",cex=0.5, pch=20, 
+        main = "FPR (p=75,n=600)",ylab="FPR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+boxplot(result_array_75_600[1:100,3,1], result_array_75_600[1:100,3,2], result_array_75_600[1:100,3,3],col = "white",cex=0.5, pch=20, 
+        main = "MER (p=75,n=600)",ylab="MER",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+
+
+# p=75, n=300, sparsity=(0.9,0.1)
+# Average FNR,FPR, MER
+mean_FNR_75_300 <- c(mean(result_array_75_300[,1,1]),mean(result_array_75_300[,1,2]),mean(result_array_75_300[,1,3]))
+mean_FPR_75_300 <-c(mean(result_array_75_300[,2,1]),mean(result_array_75_300[,2,2]),mean(result_array_75_300[,2,3]))
+mean_MER_75_300<-c(mean(result_array_75_300[,3,1]),mean(result_array_75_300[,3,2]),mean(result_array_75_300[,3,3]))
+results_75_300<-data.frame(Mean_FNR=mean_FNR_75_300,Mean_FPR=mean_FPR_75_300,Mean_MER=mean_MER_75_300)
+row.names(results_75_300)<-c('Node-Wise Lasso 1','Node-Wise Lasso 2','Graphical Lasso')
+results_75_300
+write.csv(results_75_300,file = 'ave_75_300_0.9.csv')
+
+# Scatter plots
+plot(c(1:100), result_array_75_300[1:100,1,1], ylim = c(0,1), pch =16, col = 1, main="100 FNRs of 3 models (p=75, n=300)",xlab="Times",ylab="FNR")
+points(c(1:100), result_array_75_300[1:100,1,2], pch = 16, col =2)
+points(c(1:100), result_array_75_300[1:100,1,3], pch = 16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_75_300[1:100,2,1], ylim = c(0,0.2), pch =16, col = 1, main="100 FPRs of 3 models (p=75, n=300)",xlab="Times",ylab="FPR")
+points(c(1:100), result_array_75_300[1:100,2,2], pch = 16, col =2)
+points(c(1:100), result_array_75_300[1:100,2,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_75_300[1:100,3,1], ylim = c(0,0.2), pch=16, col = 1, main="100 MERs of 3 models (p=75, n=300)",xlab="Times",ylab="MER")
+points(c(1:100), result_array_75_300[1:100,3,2], pch =16, col =2)
+points(c(1:100), result_array_75_300[1:100,3,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+# Boxplots
+boxplot(result_array_75_300[1:100,1,1], result_array_75_300[1:100,1,2], result_array_75_300[1:100,1,3],col = "white",cex=0.5, pch=20, 
+        main = "FNR (p=75,n=300)",ylab="FNR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"))
+boxplot(result_array_75_300[1:100,2,1], result_array_75_300[1:100,2,2], result_array_75_300[1:100,2,3],col = "white",cex=0.5, pch=20, 
+        main = "FPR (p=75,n=300)",ylab="FPR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+boxplot(result_array_75_300[1:100,3,1], result_array_75_300[1:100,3,2], result_array_75_300[1:100,3,3],col = "white",cex=0.5, pch=20, 
+        main = "MER (p=75,n=300)",ylab="MER",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+
+
+# p=75, n=500, sparsity=(0.8,0.2)
+# Average FNR,FPR, MER
+mean_FNR_75_500_0.8 <- c(mean(result_array_75_500_0.8[,1,1]),mean(result_array_75_500_0.8[,1,2]),mean(result_array_75_500_0.8[,1,3]))
+mean_FPR_75_500_0.8 <-c(mean(result_array_75_500_0.8[,2,1]),mean(result_array_75_500_0.8[,2,2]),mean(result_array_75_500_0.8[,2,3]))
+mean_MER_75_500_0.8<-c(mean(result_array_75_500_0.8[,3,1]),mean(result_array_75_500_0.8[,3,2]),mean(result_array_75_500_0.8[,3,3]))
+results_75_500_0.8<-data.frame(Mean_FNR=mean_FNR_75_500_0.8,Mean_FPR=mean_FPR_75_500_0.8,Mean_MER=mean_MER_75_500_0.8)
+row.names(results_75_500_0.8)<-c('Node-Wise Lasso 1','Node-Wise Lasso 2','Graphical Lasso')
+results_75_500_0.8
+write.csv(results_75_500_0.8,file = 'ave_75_500_0.8.csv')
+
+# Scatter plots
+plot(c(1:100), result_array_75_500_0.8[1:100,1,1], ylim = c(0,1), pch =16, col = 1, main="100 FNRs of 3 models (p=75, n=500, (0.8,0.2))",xlab="Times",ylab="FNR")
+points(c(1:100), result_array_75_500_0.8[1:100,1,2], pch = 16, col =2)
+points(c(1:100), result_array_75_500_0.8[1:100,1,3], pch = 16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_75_500_0.8[1:100,2,1], ylim = c(0,0.2), pch =16, col = 1, main="100 FPRs of 3 models (p=75, n=500, (0.8,0.2))",xlab="Times",ylab="FPR")
+points(c(1:100), result_array_75_500_0.8[1:100,2,2], pch = 16, col =2)
+points(c(1:100), result_array_75_500_0.8[1:100,2,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_75_500_0.8[1:100,3,1], ylim = c(0,0.2), pch=16, col = 1, main="100 MERs of 3 models (p=50, n=500, (08,0.2))",xlab="Times",ylab="MER")
+points(c(1:100), result_array_75_500_0.8[1:100,3,2], pch =16, col =2)
+points(c(1:100), result_array_75_500_0.8[1:100,3,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+
+# Boxplots
+boxplot(result_array_75_500_0.8[1:100,1,1], result_array_75_500_0.8[1:100,1,2], result_array_75_500_0.8[1:100,1,3],col = "white",cex=0.5, pch=20, 
+        main = "FNR (p=75,n=500, (0.8,0.2))",ylab="FNR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"))
+boxplot(result_array_75_500_0.8[1:100,2,1], result_array_75_500_0.8[1:100,2,2], result_array_75_500_0.8[1:100,2,3],col = "white",cex=0.5, pch=20, 
+        main = "FPR (p=75,n=500, (0.8,0.2))",ylab="FPR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.1))
+boxplot(result_array_75_500_0.8[1:100,3,1], result_array_75_500_0.8[1:100,3,2], result_array_75_500_0.8[1:100,3,3],col = "white",cex=0.5, pch=20, 
+        main = "MER (p=75,n=500, (0.8,0.2))",ylab="MER",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.2))
+
+
+# p=75, n=500, sparsity=(0.6,0.4)
+# Average FNR,FPR, MER
+mean_FNR_75_500_0.6 <- c(mean(result_array_75_500_0.6[,1,1]),mean(result_array_75_500_0.6[,1,2]),mean(result_array_75_500_0.6[,1,3]))
+mean_FPR_75_500_0.6 <-c(mean(result_array_75_500_0.6[,2,1]),mean(result_array_75_500_0.6[,2,2]),mean(result_array_75_500_0.6[,2,3]))
+mean_MER_75_500_0.6<-c(mean(result_array_75_500_0.6[,3,1]),mean(result_array_75_500_0.6[,3,2]),mean(result_array_75_500_0.6[,3,3]))
+results_75_500_0.6<-data.frame(Mean_FNR=mean_FNR_75_500_0.6,Mean_FPR=mean_FPR_75_500_0.6,Mean_MER=mean_MER_75_500_0.6)
+row.names(results_75_500_0.6)<-c('Node-Wise Lasso 1','Node-Wise Lasso 2','Graphical Lasso')
+results_75_500_0.6
+write.csv(results_75_500_0.6,file = 'ave_75_500_0.6.csv')
+
+# Scatter plots
+plot(c(1:100), result_array_75_500_0.6[1:100,1,1], ylim = c(0,1), pch =16, col = 1, main="100 FNRs of 3 models (p=75, n=500, (0.6,0.4))",xlab="Times",ylab="FNR")
+points(c(1:100), result_array_75_500_0.6[1:100,1,2], pch = 16, col =2)
+points(c(1:100), result_array_75_500_0.6[1:100,1,3], pch = 16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_75_500_0.6[1:100,2,1], ylim = c(0,0.4), pch =16, col = 1, main="100 FPRs of 3 models (p=75, n=500, (0.6,0.4))",xlab="Times",ylab="FPR")
+points(c(1:100), result_array_75_500_0.6[1:100,2,2], pch = 16, col =2)
+points(c(1:100), result_array_75_500_0.6[1:100,2,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+plot(c(1:100), result_array_75_500_0.6[1:100,3,1], ylim = c(0,0.4), pch=16, col = 1, main="100 MERs of 3 models (p=75, n=500,(0.6,0.4))",xlab="Times",ylab="MER")
+points(c(1:100), result_array_75_500_0.6[1:100,3,2], pch =16, col =2)
+points(c(1:100), result_array_75_500_0.6[1:100,3,3], pch =16, col =3)
+legend('top',c('nwl1','nwl2','gl'), col = c(1,2,3), pch  = c(16,16,16),ncol=3,bty='n')
+
+
+# Boxplots
+boxplot(result_array_75_500_0.6[1:100,1,1], result_array_75_500_0.6[1:100,1,2], result_array_75_500_0.6[1:100,1,3],col = "white",cex=0.5, pch=20, 
+        main = "FNR (p=75,n=500, (0.6,0.4))",ylab="FNR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"))
+boxplot(result_array_75_500_0.6[1:100,2,1], result_array_75_500_0.6[1:100,2,2], result_array_75_500_0.6[1:100,2,3],col = "white",cex=0.5, pch=20, 
+        main = "FPR (p=75,n=500,(0.6,0.4))",ylab="FPR",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.4))
+boxplot(result_array_75_500_0.6[1:100,3,1], result_array_75_500_0.6[1:100,3,2], result_array_75_500_0.6[1:100,3,3],col = "white",cex=0.5, pch=20, 
+        main = "MER (p=75,n=500,(0.6,0.4))",ylab="MER",names =c("Nodewise lasso 1","Nodewise lasso 2","Graphic lasso"),ylim=c(0,0.4))
+```
+
