@@ -1,0 +1,524 @@
+---
+title: "ST433 Task1"
+author: "Group 11: 47565, 45795, 48272, 56266, 55974"
+date: "2022-12-08"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(leaps)
+library(MASS)
+library(ggplot2)
+library(lattice)
+library(caret)
+library(class)
+library(e1071)
+library(dplyr)
+library(tidyverse)
+library(Boruta)
+library(glmnet)
+library(randomForest)
+library(Rfast)
+library(modeest)
+```
+
+# Load data
+```{r}
+data <- read.csv('data.csv.gz') # reading the data
+head(data) # checking the first 5 rows of data
+```
+
+# Checking for NA Values
+```{r}
+data <- na.omit(data) # removing NA values if any
+sum(is.na(data)) # checking whether we have any NA value or not
+```
+# Exploratory Data Analysis
+```{r}
+# Separating Data and Checking Distribution of Labels
+TREG <- data[data$label=="TREG",]
+CD4 <- data[data$label=="CD4+T",]
+P <- ncol(data)-1
+N <- nrow(data)
+N_TREG <- nrow(TREG)
+N_CD4 <- nrow(CD4)
+M <- matrix(data = NA, nrow = 3, ncol = 1)
+Number <- data.frame(M,row.names =c("TREG","CD4+T","Total"))
+colnames(Number)="Number"
+Number[1,1]=N_TREG
+Number[2,1]=N_CD4
+Number[3,1]=N
+View(Number)
+
+# Basic Statistics of Two Type of Cells
+S <- matrix(data = NA, nrow = P, ncol = 3)
+Stat_CD4 <- data.frame(S,row.names =colnames(data[,-1]))
+Stat_TREG <- data.frame(S,row.names =colnames(data[,-1]))
+colnames(Stat_CD4)=c("Mean","Var","Frequency") 
+colnames(Stat_TREG)=c("Mean","Var","Frequency") 
+for(i in 1:P){
+  Stat_CD4[i,1] <- mean(CD4[,i+1])
+  Stat_CD4[i,2] <- var(CD4[,i+1])
+  Stat_TREG[i,1] <- mean(TREG[,i+1])
+  Stat_TREG[i,2] <- var(TREG[,i+1])
+}
+Stat_CD4[,3] <- colSums(CD4[,-1]!=0)/nrow(CD4)
+Stat_TREG[,3] <- colSums(TREG[,-1]!=0)/nrow(TREG)
+
+View(Stat_CD4)
+View(Stat_TREG)
+
+# Finding Top 5 mRNA as per Statistics
+CD4_1 <- Stat_CD4[order(Stat_CD4[,1]),]
+CD4_2 <- Stat_CD4[order(Stat_CD4[,2]),]
+CD4_3 <- Stat_CD4[order(Stat_CD4[,3]),]
+
+CD4_1_H <- Stat_CD4[order(Stat_CD4[,1],decreasing = TRUE),]
+CD4_2_H <- Stat_CD4[order(Stat_CD4[,2],decreasing = TRUE),]
+CD4_3_H <- Stat_CD4[order(Stat_CD4[,3],decreasing = TRUE),]
+
+TREG_1 <- Stat_TREG[order(Stat_TREG[,1]),]
+TREG_2 <- Stat_TREG[order(Stat_TREG[,2]),]
+TREG_3 <- Stat_TREG[order(Stat_TREG[,3]),]
+
+TREG_1_H <- Stat_TREG[order(Stat_TREG[,1],decreasing = TRUE),]
+TREG_2_H <- Stat_TREG[order(Stat_TREG[,2],decreasing = TRUE),]
+TREG_3_H <- Stat_TREG[order(Stat_TREG[,3],decreasing = TRUE),]
+
+Q <- matrix(data = NA, nrow = 5, ncol = 3)                         
+Highest_mRNA_CD4 <- data.frame(Q)
+Highest_mRNA_TREG <- data.frame(Q)
+colnames(Highest_mRNA_CD4)=c("Mean","Var","Frequency") 
+colnames(Highest_mRNA_TREG)=c("Mean","Var","Frequency") 
+
+Highest_mRNA_CD4[,1] <- rownames(CD4_1_H[1:5,])
+Highest_mRNA_CD4[,2] <- rownames(CD4_2_H[1:5,])
+Highest_mRNA_CD4[,3] <- rownames(CD4_3_H[1:5,])
+
+Highest_mRNA_TREG[,1] <- rownames(TREG_1_H[1:5,])
+Highest_mRNA_TREG[,2] <- rownames(TREG_2_H[1:5,])
+Highest_mRNA_TREG[,3] <- rownames(TREG_3_H[1:5,])
+
+
+View(Highest_mRNA_TREG)
+View(Highest_mRNA_CD4)
+
+
+# Plot 
+Abs <- cbind(Stat_CD4$Mean,Stat_TREG$Mean,abs(Stat_CD4$Mean-Stat_TREG$Mean))
+rownames(Abs)=rownames(Stat_CD4)
+colnames(Abs)=c("Stat_CD4","Stat_TREG","abs")
+or_Abs <- Abs[order(Abs[,3],decreasing = TRUE),]
+top10 <- or_Abs[1:10,]
+top10<-as.data.frame(top10)
+
+ggplot(top10)+
+  geom_bar(aes(x=rownames(top10),y=abs),position="dodge",stat = "identity")+
+  theme(axis.text.x = element_text(angle=90))+
+  xlab('Top 10 Genes')+
+  ylab('Absolute Mean Difference')
+```
+# Train-Test Split
+```{r}
+set.seed(1) # setting seed for reproducibility
+train <- sample(seq(nrow(data)),4200, replace=FALSE) # creating indices for training data
+test <- data[-train,] # separating test data
+```
+
+# Variable Selection using Boruta
+```{r}
+set.seed(2)
+data$label <- factor(data$label) # converting labels into factor type
+class_fit <- Boruta(x=data[train,-1],y=data[train,]$label)
+indices <- which(class_fit$finalDecision=='Confirmed') # taking indices of features which are confirmed by Boruta method
+best_features <- names(class_fit$finalDecision[indices])
+print(class_fit)
+
+features_imp <- attStats(class_fit)
+print(features_imp[features_imp$decision=='Confirmed',])
+
+imp_score <- features_imp[features_imp$decision=='Confirmed',"maxImp"]
+
+feature_imp_df <- data.frame(Best_Features=best_features,Importance=imp_score)
+feature_imp_df
+
+abc = order(imp_score, decreasing = TRUE)[1:10]
+
+feature_top10 <- data.frame(Best_Features =best_features[abc], Importance=imp_score[abc]) 
+
+# Plotting Top 10 Features with maximum importance score
+ggplot(feature_top10)+
+  geom_bar(aes(x=Best_Features,y=Importance),position="dodge",stat = "identity")+
+  theme(axis.text.x = element_text(angle=90))
+```
+
+# Preparing Training and Testing Data with Best Features
+```{r}
+traindata <- data[train,best_features] # training data
+train_label<- data[train,]$label 
+traindata['Label']<- train_label
+testdata <- test[,c('label',best_features)] # testing data
+head(testdata)
+head(traindata)
+```
+
+# Building LDA Model
+```{r}
+set.seed(3)
+data.fwd.lda<-lda(Label~.,data=traindata) # fitting the model
+data.fwd.lda
+scaling <- data.fwd.lda$scaling
+data.fwd.projected <- as.matrix(data[, best_features]) %*% scaling # matrix of projected points 
+centroids <- data.fwd.lda$means %*% scaling
+centroids
+
+is_training <- 1:nrow(data) %in% train
+plot(data.fwd.projected, col=data$label,pch=ifelse(is_training, 19, 1), cex=0.4)
+points(centroids,col=1:2, pch=18, cex=1.5)
+legend('bottomright', legend=c(levels(data$label), 'train', 'test'),
+       col=c(1:2, 'black','black'), pch=c(1,1,19,1), cex=0.6)
+
+ret.lda <- predict(data.fwd.lda, testdata[,-1]) # predicting labels for test set
+ret.lda$class # predictions of lda model
+conf_lda <- confusionMatrix(data=factor(ret.lda$class),reference = factor(testdata$label)) # creating confusion matrix
+conf_lda
+```
+
+# Building Logistic Regression Model
+```{r}
+set.seed(4)
+data.glm <- glm(Label ~ ., data = traindata, family = binomial) # fitting logistic model
+pred.glm1 <- predict(data.glm, testdata[,-1], type='response') # predicting labels for test set
+glm.pred <- rep('CD4+T', length(pred.glm1))
+glm.pred[pred.glm1 > 0.5] <- "TREG"
+conf_log <- confusionMatrix(data=factor(glm.pred),reference = factor(testdata$label)) # creating confusion matrix
+conf_log
+```
+
+# Building QDA Model
+```{R}
+set.seed(5)
+data.qda <- qda(Label ~ ., data =traindata) # fitting qda model
+qda_pred <- predict(data.qda, testdata[,-1]) # predicting labels for test set
+conf_qda <- confusionMatrix(data=factor(qda_pred$class),reference = factor(testdata$label)) # creating confusion matrix
+conf_qda
+```
+
+# Building KNN Model
+```{r}
+set.seed(6)
+
+Rfast::knn.cv(folds = NULL, nfolds = 10, stratified = TRUE, seed = 42,factor(traindata$Label),as.matrix(traindata[,best_features]),k=c(1:30), 
+dist.type = "euclidean", type = "C", freq.option = 0)  # performing cross validation to determine the optimal value of k
+
+
+train.X <- traindata[,-211]
+train.Direction <- traindata$Label
+test.X <- test[,best_features]
+
+knn.pred <- class::knn(train.X, test.X, train.Direction, k = 3, prob=T) #fitting knn model with optimal k
+knn.win.prob <- attributes(knn.pred)$prob # obtaining class probability
+conf_knn <- confusionMatrix(data=factor(knn.pred),reference = factor(testdata$label))
+conf_knn
+```
+
+# Building Lasso-Logistic Model
+```{r}
+set.seed(7)
+
+train_las_y <- c(data[train,1])
+train_las_x <-as.matrix(data[train,-1])
+fit.las <- glmnet(train_las_x, train_las_y, alpha=1,family = 'binomial') # fitting the model
+plot(fit.las, xvar='lambda')
+
+fit_cv <- cv.glmnet(train_las_x, train_las_y, alpha=1, family = 'binomial', type.measure='class') # performing cross validation to obtain optimal lambda
+plot(fit_cv)
+best_lambda <- fit_cv$lambda.1se
+pred_las <- predict(fit.las, newx =as.matrix(data[-train,-1]) , type = "response", s = best_lambda)
+pred.las <- rep('CD4+T', length(pred_las))
+pred.las[pred_las > 0.5] <- "TREG"
+conf_las <- confusionMatrix(data=factor(pred.las),reference = factor(testdata$label))
+conf_las
+```
+
+# Building Random Forest Classifier Model
+```{r}
+set.seed(8)
+
+rf_mod <- randomForest(Label~.,data=traindata) #fitting random forest classifier
+rf_pred <- predict(rf_mod, testdata[,-1]) # predicting for test set
+rf_prob <- predict(rf_mod, testdata[,-1], type='prob')[,2] # obtaining class probability
+conf_rf <- confusionMatrix(data=factor(rf_pred),reference = factor(testdata$label))
+conf_rf
+```
+
+# Building Support Vector Classifier Model
+```{r}
+set.seed(9)
+
+tune.out <- tune(svm, Label~., data = traindata, kernel = "linear", ranges = list(cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))) #performing cross validation to determine optimal penalization cost, c
+bestmod <- tune.out$best.model
+summary(bestmod)
+svm_mod<-svm(Label~.,data=traindata,kernel="linear",cost = 0.001,probability=TRUE) # fitting model with optimal c
+svc_pred <- predict(svm_mod, testdata, probability = TRUE) # predicting for test set
+svc_pred_prob <- attributes(svc_pred)$prob # obtaining class probability
+svc_prob <- svc_pred_prob[,2]
+conf_svc <- confusionMatrix(data=factor(svc_pred),reference = factor(testdata$label))
+conf_svc
+```
+
+# Visualisation of Accuracy
+```{r}
+NP <- sum(test$label == "CD4+T")
+NN <- sum(test$label == "TREG")
+
+# Logistic Regression
+threshold <- sort(unique(c(0, pred.glm1)))
+nth <- length(threshold)
+FP1 = TP1 = rep(0, nth)
+for(i in 1:nth){
+log.pred = rep("CD4+T", nrow(test))
+log.pred[pred.glm1 > threshold[i]] = "TREG"
+TP1[i] = sum(test$label == "CD4+T" & log.pred == "CD4+T") / NP # True Positive Rate
+FP1[i] = sum(test$label == "TREG" & log.pred == "CD4+T") / NN # False Positive Rate
+}
+
+# LDA
+lda.probs = ret.lda$posterior[,2]
+threshold = sort(unique(c(0, lda.probs)))
+nth = length(threshold)
+FP2 = TP2 = rep(0, nth)
+for(i in 1:nth){
+lda.pr = rep("CD4+T", nrow(test))
+lda.pr[lda.probs > threshold[i]] = "TREG"
+TP2[i] = sum(test$label == "CD4+T" & lda.pr == "CD4+T") / NP # True Positive Rate
+FP2[i] = sum(test$label == "TREG" & lda.pr == "CD4+T") / NN # False Positive Rate
+}
+
+# QDA
+qda.probs = qda_pred$posterior[,2]
+threshold = sort(unique(c(0, qda.probs)))
+nth = length(threshold)
+FP3 = TP3 = rep(0, nth)
+for(i in 1:nth){
+qda.pr = rep("CD4+T", nrow(test))
+qda.pr[qda.probs > threshold[i]] = "TREG"
+TP3[i] = sum(test$label == "CD4+T" & qda.pr == "CD4+T") / NP # True Positive Rate
+FP3[i] = sum(test$label == "TREG" & qda.pr == "CD4+T") / NN # False Positive Rate
+}
+
+# KNN
+knn.post = ifelse(knn.pred == "TREG", knn.win.prob, 1 - knn.win.prob) # posterior probability
+threshold = sort(unique(c(0, knn.post)))
+nth = length(threshold)
+FP4 = TP4 = rep(0, nth)
+for(i in 1:nth){
+knn.pr = rep("CD4+T", nrow(test))
+knn.pr[knn.post > threshold[i]] = "TREG"
+TP4[i] = sum(test$label == "CD4+T" & knn.pr == "CD4+T") / NP # True Positive Rate
+FP4[i] = sum(test$label == "TREG" & knn.pr == "CD4+T") / NN # False Positive Rate
+}
+
+# Lasso-Logistic Regression
+threshold <- sort(unique(c(0, pred_las)))
+nth <- length(threshold)
+FP5 = TP5 = rep(0, nth)
+for(i in 1:nth){
+las.pred = rep("CD4+T", nrow(test))
+las.pred[pred_las > threshold[i]] = "TREG"
+TP5[i] = sum(test$label == "CD4+T" & las.pred == "CD4+T") / NP # True Positive Rate
+FP5[i] = sum(test$label == "TREG" & las.pred == "CD4+T") / NN # False Positive Rate
+}
+ 
+# RF
+threshold <- sort(unique(c(0, rf_prob)))
+nth <- length(threshold)
+FP6 = TP6 = rep(0, nth)
+for(i in 1:nth){
+rf.pred = rep("CD4+T", nrow(testdata))
+rf.pred[rf_prob > threshold[i]] = "TREG"
+TP6[i] = sum(testdata$label == "CD4+T" & rf.pred == "CD4+T") / NP # True Positive Rate
+FP6[i] = sum(testdata$label == "TREG" & rf.pred == "CD4+T") / NN # False Positive Rate
+}
+
+# SVC
+threshold <- sort(unique(c(0, svc_prob)))
+nth <- length(threshold)
+FP7 = TP7 = rep(0, nth)
+for(i in 1:nth){
+svc.pred = rep("CD4+T", nrow(testdata))
+svc.pred[svc_prob > threshold[i]] = "TREG"
+TP7[i] = sum(testdata$label == "CD4+T" & svc.pred == "CD4+T") / NP # True Positive Rate
+FP7[i] = sum(testdata$label == "TREG" & svc.pred == "CD4+T") / NN # False Positive Rate
+}
+
+# ROC Curve
+plot(
+x = c(0, 1),
+y = c(0, 1),
+type = "n",
+main = "ROC",
+xlab = "False Positive Rate",
+ylab = "True Positive Rate"
+)
+lines(FP1, TP1, col = "purple", lwd = 2)
+lines(FP2, TP2, col = "blue", lwd = 2)
+lines(FP3, TP3, col = "green", lwd = 2)
+lines(FP4, TP4, col = "red", lwd = 2)
+lines(FP5, TP5, col = "orange", lwd = 2)
+lines(FP6, TP6, col = "pink", lwd = 2)
+lines(FP7, TP7, col = "violet", lwd = 2)
+legend('bottomright',
+0,
+1,
+legend = c("Logit", "LDA", "QDA", "KNN", "Lasso-logit", "Random Forest", "Support Vector Classifier"),
+col = c("purple", "blue", "green", "red","orange", "pink", "violet"),
+lwd = c(2, 2, 2, 2, 2, 2, 2),
+cex = 0.8
+)
+
+# AUC
+AUC = function(FP, TP){
+a = head(TP, -1)
+b = tail(TP, -1)
+h = diff(FP)
+s = sum((a + b) * h) / 2
+return(s)
+}
+
+# AUC of Logistic Regression
+(auc1 = AUC(FP1, TP1))
+# AUC of LDA
+(auc2 = AUC(FP2, TP2))
+# AUC of QDA
+(auc3 = AUC(FP3, TP3))
+# AUC of KNN
+(auc4 = AUC(FP4, TP4))
+# AUC of Lasso-Logistic
+(auc5 = AUC(FP5, TP5))
+# AUC of Random Forest
+(auc6 = AUC(FP6, TP6))
+# AUC of Support Vector Classifier
+(auc7 = AUC(FP7, TP7))
+```
+
+# Aggregating results of LDA, QDA, Logistic Regression, KNN Classifiers and lasso-logistic regression
+```{r}
+set.seed(10)
+agg_label<-character()
+
+lda_pred_bin <- as.numeric(ret.lda$class)-1 # converting responses into binary form
+qda_pred_bin <- as.numeric(qda_pred$class)-1
+log_pred_bin <- as.numeric(factor(glm.pred))-1
+knn_pred_bin <- as.numeric(knn.pred)-1
+las_pred_bin <- as.numeric(factor(pred.las))-1
+rf_pred_bin <- as.numeric(rf_pred)-1
+svc_pred_bin <- as.numeric(svc_pred)-1
+
+# obtaining majority voting among all models
+for (i in 1:length(testdata$label)){
+  treg_count<-0
+  cd4_count<-0
+  labels<-c(lda_pred_bin[i],qda_pred_bin[i],log_pred_bin[i],knn_pred_bin[i],las_pred_bin[i],rf_pred_bin[i],svc_pred_bin[i])
+  mode<-mfv(labels)
+  
+  if (mode==1){
+    agg_label[i]<-'TREG'}
+  else{
+    agg_label[i]<-'CD4+T'}
+}
+
+agg_label <- factor(agg_label)
+confusionMatrix(data = agg_label, reference = factor(test$label)) # printing confusion matrix
+```
+
+# mypredict function
+```{r}
+set.seed(10)
+mypredict <- function(){
+  
+data<-read.csv('data.csv')
+
+fin_data <- read.csv('test.csv')
+
+set.seed(1)
+data$label <- factor(data$label)
+train <- sample(seq(nrow(data)),4200, replace=FALSE)
+
+set.seed(2)
+class_fit <- Boruta(x=data[train,-1],y=data[train,]$label)
+indices <- which(class_fit$finalDecision=='Confirmed')
+best_features <- names(class_fit$finalDecision[indices])
+
+traindata<-data[train,best_features]
+train_label<-data[train,]$label 
+traindata['Label']<-train_label
+filtered_data <-fin_data[,best_features]
+
+#LDA
+data.fwd.lda<-lda(Label~.,data=traindata)
+ret.lda <- predict(data.fwd.lda, filtered_data)
+
+#logistic
+data.glm <- glm(Label ~ ., data = traindata, family = binomial)
+pred.glm1 <- predict(data.glm, filtered_data, type='response')
+glm.pred <- rep('CD4+T', length(pred.glm1))
+glm.pred[pred.glm1 > 0.5] <- "TREG"
+
+#QDA
+data.qda <- qda(Label ~ ., data =traindata)
+qda_pred <- predict(data.qda, filtered_data)
+
+#KNN
+train.X <- traindata[,best_features]
+train.Direction <- traindata$Label
+knn.pred <- class::knn(train.X, filtered_data, train.Direction, k = 3, prob=T)
+
+#LASSO
+train_las_y <- c(data[train,1])
+train_las_x <-as.matrix(data[train,-1])
+fit.las <- glmnet(train_las_x, train_las_y, alpha=1,family = 'binomial')
+fit_cv <- cv.glmnet(train_las_x, train_las_y, alpha=1, family = 'binomial', type.measure='class')
+best_lambda <- fit_cv$lambda.1se
+pred_las <- predict(fit.las, newx =as.matrix(fin_data[,-1]) , type = "response", s = best_lambda)
+pred.las <- rep('CD4+T', length(pred_las))
+pred.las[pred_las > 0.5] <- "TREG"
+
+#RANDOM FOREST
+rf_mod <- randomForest(Label~.,data=traindata) 
+rf_pred <- predict(rf_mod, filtered_data)
+
+#SVM
+svm_mod<-svm(Label~.,data=traindata,kernel="linear",cost = 0.001,probability=TRUE)
+svc_pred <- predict(svm_mod, filtered_data, probability = TRUE)
+
+#COMBINATION
+
+agg_label<-character()
+lda_pred_bin <- as.numeric(ret.lda$class)-1
+qda_pred_bin <- as.numeric(qda_pred$class)-1
+log_pred_bin <- as.numeric(factor(glm.pred))-1
+knn_pred_bin <- as.numeric(knn.pred)-1
+las_pred_bin <- as.numeric(factor(pred.las))-1
+rf_pred_bin <- as.numeric(rf_pred)-1
+svc_pred_bin <- as.numeric(svc_pred)-1
+
+for (i in 1:length(knn.pred)){
+  treg_count<-0
+  cd4_count<-0
+  labels<-c(lda_pred_bin[i],qda_pred_bin[i],log_pred_bin[i],knn_pred_bin[i],las_pred_bin[i],rf_pred_bin[i],svc_pred_bin[i])
+  mode<-mfv(labels)
+  
+  if (mode==1){
+    agg_label[i]<-'TREG'}
+  else{
+    agg_label[i]<-'CD4+T'}
+}
+return(agg_label)
+}
+
+predictlabel<-mypredict()
+```
+## From the above it is clear that accuracy increases on aggregating the results of different models. If we compare stand-alone models then it is clear that LDA is the best classifier.
